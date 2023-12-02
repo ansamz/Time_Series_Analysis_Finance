@@ -1,0 +1,74 @@
+---
+title: "The Impact of ChatGPT news on MSFT"
+author: "Ansam Zedan, Daniel Wullschleger"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Insert introduction here
+
+First we get the MSFT price data via yahoo API and we do an Augmented Dickey-Fuller (ADF) Test to see whether the data is already stationary.
+
+```{r echo=FALSE}
+if (!require("vars")) install.packages("vars", dependencies=TRUE)
+if (!require("tseries")) install.packages("tseries", dependencies=TRUE)
+if (!require("quantmod")) install.packages("quantmod", dependencies=TRUE)
+
+library(vars)
+library(tseries)
+library(quantmod)
+
+MSFT <- getSymbols.yahoo("MSFT", from="2022-01-01", to="2023-11-18", periodicity = "daily", auto.assign=FALSE)[,6]
+
+adf.test(MSFT) 
+```
+
+We see that based on the p-value of the ADF Test, that the price data itself is non-stationary.
+So we a apply a log-transform with subsequent differencing to calculate continuous returns on MSFT.
+These should behave stationary.
+
+```{r pressure, echo=FALSE}
+MSFT_returns <- na.omit(diff(log(MSFT)))
+adf.test(MSFT_returns)
+```
+Now, that we deal with stationary data we can begin with our analysis. 
+
+First we include the ChatGPT News Time Series to then create a Vector Autoregression model as we want to find out, whether ChatGPT News are a causal driver for MSFT price returns.
+
+We then do a coefficient test, to get more information on the statistical significance of the coefficients of our VAR Model.
+
+
+
+
+```{r pressure, echo=FALSE}
+coeftest(VAR_est)
+MSFT_VAR <- VAR(cbind(MSFT_returns, ChatGPT), ic="AIC", lag.max = 24)
+
+```
+
+As not all coeffcients are signifcant, we may do a causality test. This way, we can find out, if ChatGPT News are in fact a causal driver for MSFT prices
+
+
+
+```{r pressure, echo=FALSE}
+
+causality(MSFT_VAR, cause="ChatGPT")["Granger"] 
+causality(VAR_est, cause="Inflation_CH")["Granger"] 
+
+```
+
+Lastly, it would be interesting to find out how ChatGPT News actually influence the MSFT price returns. So that we may estimate long  such news do have effect on the price.
+
+For this we simulate shocks to the system
+
+
+```{r pressure, echo=FALSE}
+
+plot(irf(VAR_est, impulse="ChatGPT", response="MSFT_returns"))
+
+
+```
