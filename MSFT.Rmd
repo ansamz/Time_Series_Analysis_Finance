@@ -17,14 +17,20 @@ First we get the recent MSFT price data from the beginning of 2022 up to today v
 if (!require("vars")) install.packages("vars", dependencies=TRUE)
 if (!require("tseries")) install.packages("tseries", dependencies=TRUE)
 if (!require("quantmod")) install.packages("quantmod", dependencies=TRUE)
+if (!require("PerformanceAnalytics")) install.packages("PerformanceAnalytics", dependencies=TRUE)
+if (!require("forecast")) install.packages("forecast", dependencies=TRUE)
+if (!require("rugarch")) install.packages("rugarch", dependencies=TRUE)
 
+library(PerformanceAnalytics)
+library(forecast)
+library(rugarch)
 library(vars)
 library(tseries)
 library(quantmod)
 
 MSFT <- getSymbols.yahoo("MSFT", from="2022-01-01", to="2023-12-01", periodicity = "daily", auto.assign=FALSE)[,6]
 
-ChatGPT <- read.csv("ChatGPT.csv")
+#ChatGPT <- read.csv("ChatGPT.csv")
 
 plot(MSFT)
 ```
@@ -40,6 +46,7 @@ These should behave stationary.
 
 ```{r echo=FALSE, include=TRUE}
 MSFT_returns <- na.omit(diff(log(MSFT)))
+colnames(MSFT_returns)<-"MSFT_Returns"
 adf.test(MSFT_returns)
 
 plot(MSFT_returns)
@@ -52,7 +59,7 @@ We then do a coefficient test, to get more information on the statistical signif
 
 ```{r echo=FALSE, include=TRUE}
 coeftest(VAR_est)
-MSFT_VAR <- VAR(cbind(MSFT_returns, ChatGPT), ic="AIC", lag.max = 24)
+#MSFT_VAR <- VAR(cbind(MSFT_returns, ChatGPT), ic="AIC", lag.max = 24)
 
 ```
 
@@ -61,8 +68,8 @@ As not all coeffcients are signifcant, we may do a causality test. This way, we 
 
 
 ```{r echo=FALSE, include=TRUE}
-causality(MSFT_VAR, cause="ChatGPT")["Granger"] 
-causality(VAR_est, cause="Inflation_CH")["Granger"] 
+#causality(MSFT_VAR, cause="ChatGPT")["Granger"] 
+#causality(VAR_est, cause="Inflation_CH")["Granger"] 
 
 ```
 
@@ -72,6 +79,68 @@ For this we simulate shocks to the system
 
 
 ```{r echo=FALSE, include=TRUE}
-plot(irf(VAR_est, impulse="ChatGPT", response="MSFT_returns"))
+#plot(irf(VAR_est, impulse="ChatGPT", response="MSFT_returns"))
 
 ```
+
+GARCH Model:
+
+For our GARCH model we calculate a 30-day rolling volatility
+
+```{r echo=FALSE, include=TRUE}
+chart.RollingPerformance(R = MSFT_returns, width = 30,
+                         FUN = "sd.annualized", scale = 252, main = "30-day rolling volatility")
+
+```
+To setup a GARCH Model for our MSFT analysis we have to specify the orders of an ARMA model as well as a GARCH Model. 
+
+From class we learned, that in Finance is it common to stick to a GARCH(1,1) model, so we just need to estimate the ARMA model orders. For this, we let auto.arima find the best fitting orders
+
+
+```{r echo=FALSE, include=TRUE}
+auto.arima(MSFT_returns)
+```
+
+We see that auto.arima has found that the auto-regressive (AR) part of the ARMA model has an order of 2 present as the coefficients ar1 and ar2 were estimated. The Absence of ma coefficients suggests that the Moving Average (MA) part has an order of 0.
+
+Now we can specify our GARCH model and fit it to our data.
+
+```{r echo=TRUE, include=TRUE}
+MSFT_garch_spec <- ugarchspec(mean.model = list(armaOrder = c(2,0), include.mean = TRUE),
+                        variance.model = list(garchOrder = c(1,1), model = "sGARCH"))
+
+MSFT_garch_fit <- ugarchfit(data = MSFT_returns, spec = MSFT_garch_spec)
+```
+
+Now we can use the sigma method to extract the estimated GARCH volatilities, so that we can plot them on a chart
+
+```{r echo=FALSE, include=TRUE}
+MSFT_volatility <- sigma(MSFT_garch_fit)
+
+par(mfrow=c(2,1)) 
+plot(MSFT_volatility, main="MSFT GARCH volatility")
+plot(abs(MSFT_returns), main="Realized volatility")
+```
+
+AS a last step, we may forecast the returns and volatility values.
+Here, ARMA will estimate the returns, while GARCH estimates the volatilities
+
+```{r echo=FALSE, include=TRUE}
+par(mfrow=c(1,1))
+MSFT_volatility_forecast <- ugarchforecast(fitORspec = MSFT_garch_fit, n.ahead = 5)
+plot(MSFT_volatility_forecast, which=1)
+plot(MSFT_volatility_forecast, which=3)
+```
+
+```{r echo=FALSE, include=TRUE}
+auto.arima(MSFT_returns)
+```
+
+```{r echo=FALSE, include=TRUE}
+auto.arima(MSFT_returns)
+```
+
+```{r echo=FALSE, include=TRUE}
+auto.arima(MSFT_returns)
+```
+
