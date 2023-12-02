@@ -9,11 +9,7 @@ output: pdf_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Insert introduction here
-
-First we get the recent MSFT price data from the beginning of 2022 up to today via yahoo API and plot it so that we can inspect if the time series already behaves stationary
-
-```{r echo=FALSE, include=TRUE}
+```{r include=FALSE}
 if (!require("vars")) install.packages("vars", dependencies=TRUE)
 if (!require("tseries")) install.packages("tseries", dependencies=TRUE)
 if (!require("quantmod")) install.packages("quantmod", dependencies=TRUE)
@@ -27,7 +23,13 @@ library(rugarch)
 library(vars)
 library(tseries)
 library(quantmod)
+library(tinytex)
+```
+# Insert introduction here
 
+First we get the recent MSFT price data from the beginning of 2022 up to today via yahoo API and plot it so that we can inspect if the time series already behaves stationary
+
+```{r echo=FALSE, include=TRUE}
 MSFT <- getSymbols.yahoo("MSFT", from="2022-01-01", to="2023-12-01", periodicity = "daily", auto.assign=FALSE)[,6]
 
 #ChatGPT <- read.csv("ChatGPT.csv")
@@ -58,9 +60,8 @@ First we include the ChatGPT News Time Series to then create a Vector Autoregres
 We then do a coefficient test, to get more information on the statistical significance of the coefficients of our VAR Model.
 
 ```{r echo=FALSE, include=TRUE}
-coeftest(VAR_est)
 #MSFT_VAR <- VAR(cbind(MSFT_returns, ChatGPT), ic="AIC", lag.max = 24)
-
+#coeftest(MSFT_VAR)
 ```
 
 As not all coeffcients are signifcant, we may do a causality test. This way, we can find out, if ChatGPT News are in fact a causal driver for MSFT prices
