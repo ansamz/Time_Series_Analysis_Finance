@@ -40,7 +40,7 @@ Vector Autoregressive (VAR) processes are popular in economics for their flexibi
 Hereby MSFT price data was downloaded through the Yahoo API in R and Reddit posts were scraped using Jupyter Notebooks. The python libraries nltk, textblob and wordlcoud were of support in the creation of the sentiment scores.
 
 # Analysis:
-First, we import the data and convert it to a time series so that we may plot it
+First, we import the data and convert it to a time series so that we may plot it.
 
 ```{r echo=FALSE, include=TRUE}
 MSFT <- read.csv("data/final_data.csv")
@@ -52,26 +52,23 @@ MSFT_ts <- zoo(MSFT$MSFT.Adjusted, order.by = MSFT$Index)
 plot(MSFT_ts)
 ```
 We see a clear trend, which is an indicator for non-stationarity, so we do an Augmented Dickey-Fuller (ADF) Test to see whether the data is in fact non-stationary.
- 
+
 ```{r echo=FALSE, include=TRUE}
 adf.test(MSFT_ts) 
 ```
-
+## Achieving Stationarity
 We see that based on the p-value of 0.7051 the ADF Test suggests that the price data is non-stationary. So we a apply a log-transform with subsequent differencing to calculate continuous returns on MSFT. These should behave stationary.
-
-In the same step, we divide the dataset into a Train/Test Split, whereas November 2023 will serve as a test set for later predicitions
 
 ```{r echo=FALSE, include=TRUE}
 MSFT_returns <- na.omit(diff(log(MSFT_ts)))
-MSFT_returns
-
-MSFT_returns_train <- window(MSFT_returns, sart ="2022-01-04", end="2023-09-30")
-MSFT_returns_test <- window(MSFT_returns, start="2023-10-01")
 
 plot(MSFT_returns)
 adf.test(MSFT_returns)
 ```
+## Creating a VAR Model using News sentiment
 Now, that we deal with stationary data we can begin with our analysis. 
+
+We divide the dataset into a Train/Test Split, whereas November and December 2023 will serve as a test set for later predicitions.
 
 First we create a time series of news sentiment data. Combined with the price returns, we can create a Vector Autoregression model. This will be our basis to check whether News are a causal driver for MSFT price returns.
 
@@ -79,26 +76,33 @@ We then do a coefficient test, to get more information on the statistical signif
 
 ```{r echo=FALSE, include=TRUE}
 news_ts <- zoo(MSFT$average_polarity, order.by = MSFT$Index)
+
+MSFT_returns_train <- window(MSFT_returns, start ="2022-01-04", end="2023-09-30")
+MSFT_returns_test <- window(MSFT_returns, start="2023-10-01")
+
 news_train <- window(news_ts, start ="2022-01-04", end="2023-09-30")
 news_test <- window(news_ts, start="2023-10-01")
+
 MSFT_VAR_Data <- cbind(MSFT_returns_train, news_train)
 colnames(MSFT_VAR_Data) <- c("MSFT_Returns", "News_Sentiment")
 
 MSFT_VAR <- VAR(MSFT_VAR_Data, ic="AIC", lag.max = 24)
 coeftest(MSFT_VAR)
 ```
+We see that almost none of the coefficients have a statistical significance as their p-values are all above 0.05. An exception is the second lag of MSFT returns. It seems to have a slight negative effect on the current price of MSFT. However, there is only small evidence.
 
-We see that almost none of the coefficients have a statistical significance. As a next step, we do a Granger causality test to confirm that news data is in fact non a causal driver for the MSFT stock price 
+## Causlaity testing
+As a next step, we do a Granger causality test to confirm that our news sentiments are in fact not a causal driver for the MSFT stock price.
 
 ```{r echo=FALSE, include=TRUE}
 causality(MSFT_VAR, cause="News_Sentiment")["Granger"] 
 ```
-The p-value of 0.34 suggests that the gathered News sentiments are not a causal driver for the MSFT stock price. This leads us to reject our hypothesis.
+The p-value of 0.34 confirms that the gathered News sentiments are not a causal driver for the MSFT stock price. This leads us to reject our hypothesis.
 
-However, from a practical point of view, our VAR model may still be of some use when applied for forecasting purposes. To see if the inclusion of the news sentiment in our model has an improving effect on the models accuracy when predicting the price movements of MSFT we do some forecasting for our testing period where we include the news sentiment data of the testing period.
+## Forecasting
+From a practical point of view, our VAR model may still be of some use when applied for forecasting purposes. To see if the inclusion of the news sentiment in our model has an improving effect on the models accuracy when predicting the price movements of MSFT we do some forecasting for our testing period where we include the news sentiment data of the testing period.
 
 At the same time, we setup an ARMA model that is purely based on MSFTs previous price movements. It will serve as our benchmark. 
-
 
 ```{r echo=FALSE, include=TRUE}
 forecast_data <- data.frame(
@@ -106,31 +110,33 @@ forecast_data <- data.frame(
   News_Sentiment = news_test
 )
 
-forecast <- predict(MSFT_VAR, newdata = forecast_data, n.ahead=43)
-plot(forecast)
-MSFT_VAR_pred <- forecast$fcst$MSFT_Returns
+MSFT_VAR_pred <- predict(MSFT_VAR, newdata = forecast_data, n.ahead=43)
+plot(MSFT_VAR_pred)
+MSFT_VAR_pred_values <- MSFT_VAR_pred$fcst$MSFT_Returns
 
-rmse_VAR <- sqrt(mean((MSFT_returns_test - MSFT_VAR_pred)^2))
-rmse_VAR
+rmse_VAR <- sqrt(mean((MSFT_returns_test - MSFT_VAR_pred_values)^2))
+cat("RMSE of VAR\t\t\t", rmse_VAR)
 
 MSFT_ARMA <- auto.arima(MSFT_returns_train)
+MSFT_ARMA
 MSFT_ARMA_pred <- forecast(MSFT_ARMA, level=95, h = length(news_test))
 plot(MSFT_ARMA_pred)
 
 rmse_ARMA <- sqrt(mean((MSFT_returns_test - MSFT_ARMA_pred$mean)^2))
-rmse_ARMA
+cat("RMSE of AR(2) Benchmark \t", rmse_ARMA)
 
 ```
-We see that auto.arima has found that the auto-regressive (AR) part of our benchmark ARMA model has an order of 2, since the coefficients ar1 and ar2 were estimated. The Absence of ma coefficients suggests that the Moving Average (MA) part has an order of 0. Therefore, we essentially deal with an AR(2) model as our benchmark. During forecasting, we also see that it uses a mean of 0 with a confidence band for all future values. This makes sense, as we deal with stationary data that commonly has a mean of 0. 
+We see that auto.arima has found that the order of the auto-regressive (AR) as well as the Moving Average (MA) parts are of order 0. Therefore, we essentially deal with a mean model as our benchmark. During forecasting, we also see that it uses a mean of 0 with a confidence band for all future values. This makes sense, as we deal with stationary data that commonly has a mean of 0. 
 
-While the VAR model reaches an RSME of 0.036 when compared to the truth values of our test set, the AR(2) benchmark reaches an RSME of 0.014. This means, our more sophisticated VAR model actually performs worse than the more simple AR(2) that is purely based on past values.
+While the VAR model reaches an RSME of 0.036 when compared to the truth values of our test set, the mean model benchmark reaches an RSME of 0.014. This means, our more sophisticated VAR model actually performs worse than the more simple benchmark that is purely based on the mean.
 
-
+# Conclusion
+To be added
 ```{r echo=FALSE, include=TRUE}
 
 ```
 
-Bibliography:
+# Bibliography:
 
 Agus Shuarsono, Auliya Aziza and Wara Pramesti (2017); Comparison of vector autoregressive (VAR) and vector error correction models (VECM) for index of ASEAN stock price. DOI 10.1063/1.5016666
 
