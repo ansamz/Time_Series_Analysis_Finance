@@ -30,7 +30,7 @@ library(tinytex)
 library(zoo)
 library(ggplot2)
 ```
-# Insert introduction here
+#Introduction
 In recent years Microsoft has pushed and achieved great progress in a diverse portfolio of technologies (Microsoft, 2022) including also partnerships with AI research centers such as OpenAI. Alongside this development, its stock price has since reached new all-time highs and persists to be a major player in tech investments.
 
 Inspired by this evolution, this paper provides an analysis and forecast of the stock price of Microsoft based on news sentiment data from subreddits such as r/worldnews, r/investing and r/stocks using a vector autoregressive (VAR) model.
@@ -39,7 +39,7 @@ Vector Autoregressive (VAR) processes are popular in economics for their flexibi
 
 Hereby MSFT price data was downloaded through the Yahoo API in R and Reddit posts were scraped using Jupyter Notebooks. The python libraries nltk, textblob and wordlcoud were of support in the creation of the sentiment scores.
 
-Analysis:
+#Analysis
 First, we import the data and convert it to a time series so that we may plot it
 
 ```{r echo=FALSE, include=TRUE}
