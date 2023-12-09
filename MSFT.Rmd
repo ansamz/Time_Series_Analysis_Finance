@@ -95,13 +95,18 @@ causality(MSFT_VAR, cause="News_Sentiment")["Granger"]
 ```
 The p-value of 0.34 suggests that the gathered News sentiments are not a causal driver for the MSFT stock price. This leads us to reject our hypothesis.
 
-However, from a practical point of view, our VAR model may still be of some use when applied for forecasting purposes. To see if the inclusion of the news sentiment in our model has an improving effect on the models accuracy in predicting the price movements of MSFT we do some forecasting for our testing period.
+However, from a practical point of view, our VAR model may still be of some use when applied for forecasting purposes. To see if the inclusion of the news sentiment in our model has an improving effect on the models accuracy when predicting the price movements of MSFT we do some forecasting for our testing period where we include the news sentiment data of the testing period.
 
 At the same time, we setup an ARMA model that is purely based on MSFTs previous price movements. It will serve as our benchmark. 
 
 
 ```{r echo=FALSE, include=TRUE}
-forecast <- predict(MSFT_VAR, n.ahead = length(news_test))
+forecast_data <- data.frame(
+  MSFT_Returns = rep(NA, length(news_test)),
+  News_Sentiment = news_test
+)
+
+forecast <- predict(MSFT_VAR, newdata = forecast_data, n.ahead=43)
 plot(forecast)
 MSFT_VAR_pred <- forecast$fcst$MSFT_Returns
 
