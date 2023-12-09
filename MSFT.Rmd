@@ -18,7 +18,7 @@ if (!require("forecast")) install.packages("forecast", dependencies=TRUE)
 if (!require("rugarch")) install.packages("rugarch", dependencies=TRUE)
 if (!require("tinytex")) install.packages("tinytex", dependencies=TRUE)
 if (!require("zoo")) install.packages("zoo", dependencies=TRUE)
-if (!require("ggpl")) install.packages("ggpl", dependencies=TRUE)
+if (!require("ggplot2")) install.packages("ggplot2", dependencies=TRUE)
 
 library(PerformanceAnalytics)
 library(forecast)
@@ -28,7 +28,7 @@ library(tseries)
 library(quantmod)
 library(tinytex)
 library(zoo)
-library(ggpl)
+library(ggplot2)
 ```
 # Insert introduction here
 In recent years Microsoft has pushed and achieved great progress in a diverse portfolio of technologies (Microsoft, 2022) including also partnerships with AI research centers such as OpenAI. Alongside this development, its stock price has since reached new all-time highs and persists to be a major player in tech investments.
@@ -114,7 +114,7 @@ rmse_VAR <- sqrt(mean((MSFT_returns_test - MSFT_VAR_pred)^2))
 rmse_VAR
 
 MSFT_ARMA <- auto.arima(MSFT_returns_train)
-MSFT_ARMA_pred <- forecast(MSFT_benchmark_ARMA, level=95, h = length(news_test))
+MSFT_ARMA_pred <- forecast(MSFT_ARMA, level=95, h = length(news_test))
 plot(MSFT_ARMA_pred)
 
 rmse_ARMA <- sqrt(mean((MSFT_returns_test - MSFT_ARMA_pred$mean)^2))
