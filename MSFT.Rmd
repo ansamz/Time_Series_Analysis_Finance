@@ -29,7 +29,12 @@ library(quantmod)
 library(tinytex)
 library(zoo)
 library(ggplot2)
+library(utils)
+library(dplyr)
+library(xts)
+library(timeSeries)
 ```
+
 # Introduction 
 In recent years Microsoft has pushed and achieved great progress in a diverse portfolio of technologies (Microsoft, 2022) including also partnerships with AI research centers such as OpenAI. Alongside this development, its stock price has since reached new all-time highs and persists to be a major player in tech investments.
 
@@ -41,15 +46,59 @@ Hereby MSFT price data was downloaded through the Yahoo API in R and Reddit post
 
 # Analysis:
 First, we import the data and convert it to a time series so that we may plot it.
+After importing and converting our dataset into a workable format, we observed noticeable noise in the average_polarity data. To address this, we applied a LOESS smoothing technique. This method allows us to smooth out short-term fluctuations and highlight longer-term trends in sentiment data, crucial for correlating with stock price movements. The choice of the smoothing parameter (span) was iteratively refined to balance detail and smoothness
 
 ```{r echo=FALSE, include=TRUE}
 MSFT <- read.csv("data/final_data.csv")
 MSFT$Index <- as.Date(MSFT$Index)
 MSFT$MSFT.Adjusted <- as.numeric(as.character(MSFT$MSFT.Adjusted))
 MSFT$average_polarity <- as.numeric(as.character(MSFT$average_polarity))
+# MSFT$Index <- as.Date(MSFT$Index)
 MSFT_ts <- zoo(MSFT$MSFT.Adjusted, order.by = MSFT$Index)
 
-plot(MSFT_ts)
+# plot(MSFT_ts)
+
+events <- data.frame(
+  date = as.Date(c("2023-01-23", "2022-11-30", "2023-06-29", "2023-04-12", "2023-11-15")),
+  event = c(
+    "Microsoft investing 10 billion dollars into OpenAI",
+    "ChatGPT being released and created an AI-hype",
+    "Microsoft releasing Bing Co-Pilot and Microsoft Co-Pilot",
+    "The release of DALL-E 3 disrupting the image gen AI market",
+    "Sam Altman leaving OpenAI in November 2023"
+  )
+)
+
+# smooth polarity since it's very noisy
+ix.na = is.na(MSFT$average_polarity)
+problematic_values <- MSFT$average_polarity[ix.na]
+MSFT$average_polarity[problematic_values] <- NA
+# Replace with 0
+MSFT$average_polarity[problematic_values] <- 0
+MSFT$Index_numeric <- as.numeric(MSFT$Index - as.Date("2000-01-01"))
+MSFT$smoothed_polarity_loess <- with(MSFT, loess(average_polarity ~ Index_numeric, span = 0.2)$fitted)
+
+ggplot(data = MSFT, aes(x = Index)) +
+  geom_line(aes(y = MSFT.Adjusted, color = "MSFT.Adjusted"), size = 1) +
+  ylab("MSFT Adjusted Price") +
+  
+  geom_line(aes(y = smoothed_polarity_loess * 2000, color = "Sentiment Average Score"), size = 1) +
+  ylab("Sentiment Average Score") +
+  
+  scale_y_continuous(
+    name = "MSFT Adjusted Price",
+    sec.axis = sec_axis(~./2000, name = "Sentiment Average Score"),
+    limits = c(0, 400),
+    breaks = seq(0, 400, by = 50)
+  ) +
+  
+  scale_color_manual(
+    values = c("MSFT.Adjusted" = "#00AFBB", "Sentiment Average Score" = "red"),
+    labels = c("MSFT Adjusted Price", "Sentiment Average Score")
+  ) +
+  
+  ggtitle("MSFT Adjusted Price and Sentiment Average Score Over Time") +
+  theme_minimal()
 ```
 We see a clear trend, which is an indicator for non-stationarity, so we do an Augmented Dickey-Fuller (ADF) Test to see whether the data is in fact non-stationary.
 
@@ -116,12 +165,16 @@ MSFT_VAR_pred_values <- MSFT_VAR_pred$fcst$MSFT_Returns
 
 rmse_VAR <- sqrt(mean((MSFT_returns_test - MSFT_VAR_pred_values)^2))
 cat("RMSE of VAR\t\t\t", rmse_VAR)
+```
 
+```{r echo=FALSE, include=TRUE}
 MSFT_ARMA <- auto.arima(MSFT_returns_train)
 MSFT_ARMA
 MSFT_ARMA_pred <- forecast(MSFT_ARMA, level=95, h = length(news_test))
 plot(MSFT_ARMA_pred)
+```
 
+```{r echo=FALSE, include=TRUE}
 rmse_ARMA <- sqrt(mean((MSFT_returns_test - MSFT_ARMA_pred$mean)^2))
 cat("RMSE of AR(2) Benchmark \t", rmse_ARMA)
 
@@ -129,6 +182,73 @@ cat("RMSE of AR(2) Benchmark \t", rmse_ARMA)
 We see that auto.arima has found that the order of the auto-regressive (AR) as well as the Moving Average (MA) parts are of order 0. Therefore, we essentially deal with a mean model as our benchmark. During forecasting, we also see that it uses a mean of 0 with a confidence band for all future values. This makes sense, as we deal with stationary data that commonly has a mean of 0. 
 
 While the VAR model reaches an RSME of 0.036 when compared to the truth values of our test set, the mean model benchmark reaches an RSME of 0.014. This means, our more sophisticated VAR model actually performs worse than the more simple benchmark that is purely based on the mean.
+
+# Seasonal Adjustment
+
+### STL Decomposition
+
+After many trials of extracting seasonality by using the stl and decompose method and because the stock market data is not consistent because of holidays and the market is not open on a daily basis, here is another method to approach this problem using Fourier Transform:
+
+```{r echo=FALSE, include=TRUE}
+# Number of observations in the ime series
+n <- length(MSFT_returns)
+
+fourier <- data.frame(frequency = 1:(n/2), 
+                      spectrum = abs(fft(coredata(MSFT_returns)))[1:(n/2)])
+
+# Plot the Fourier Transform spectrum - can remove later
+ggplot(fourier, aes(x = frequency, y = spectrum)) +
+  geom_line() +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  labs(title = "Fourier Transform of MSFT Adjusted Prices", 
+       x = "Frequency", 
+       y = "Amplitude")
+```
+
+We norice in this plot the presence of multiple peaks suggesting that there are several cyclical patterns in the data. This can happen if there are multiple underlying seasonalities or other forms of cyclical behavior. But there is not a single, dominant low-frequency component that clearly stands out. This suggests that the data might not have a strong trend or annual seasonality, or it may be masked by the noise. The problem is if we attempt to model all these frequencies, there's a risk of overfitting your time series model to the noise rather than to actual, meaningful seasonal patterns.
+
+### Reevaluating seasonality and trend
+```{r echo=FALSE, include=TRUE}
+# Convert to ts object, starting from the first date, with a frequency of 365 (daily data)
+start_date <- as.numeric(format(index(MSFT_returns)[1], "%Y")) + (as.numeric(format(index(MSFT_returns)[1], "%j")) - 1) / 365
+MSFT_returns_ts <- ts(MSFT_returns, start = start_date, frequency = 365)
+
+# Conduct a spectral analysis to identify significant frequencies
+spectrum_analysis <- spectrum(MSFT_returns_ts, spans = c(3, 5), plot = FALSE)
+
+# Identify peaks in the spectral density
+peak_frequencies <- which(diff(sign(diff(spectrum_analysis$spec))) == -2) + 1
+significant_frequencies <- spectrum_analysis$freq[peak_frequencies]
+significant_spectrum <- spectrum_analysis$spec[peak_frequencies]
+
+plot(spectrum_analysis$freq, spectrum_analysis$spec, type = 'l', xlab = 'Frequency', ylab = 'Spectral Density')
+points(significant_frequencies, significant_spectrum, col = 'red', pch = 19)
+```
+
+```{r echo=FALSE, include=TRUE}
+n <- length(MSFT_returns)
+# Extract seasonal components using Fourier series
+future_fourier_terms <- fourier(MSFT_returns_ts, K = length(significant_frequencies), h = 60) # 60 forecast horizon - 2 months 
+
+# Model the seasonality by including Fourier terms as external regressors
+MSFT_seasonal_model <- auto.arima(MSFT_returns_ts, xreg = fourier_terms, seasonal = FALSE)
+summary(MSFT_seasonal_model)
+```
+The best-fit model for the series is an ARIMA(2,0,1). This model includes autoregressive (AR) terms, moving average (MA) terms, and various regression coefficients for exogenous variables. The model's log-likelihood is 1259.22, and it exhibits a reasonable AIC value, which suggest a good balance between model fit and complexity. The BIC value is also indicative of a well-fitting model. The training set error measures indicate that the model performs well on the training data, with a small mean error (ME) and low root mean squared error (RMSE) and mean absolute error (MAE). However, the MPE and MAPE are relatively high, suggesting some room for improvement in capturing certain patterns in the data. The MASE is 0.6607, and the autocorrelation of residuals (ACF1) is -0.0065.
+
+```{r echo=FALSE, include=TRUE}
+# Fit the time series model and make forecasts
+MSFT_forecast <- forecast(MSFT_seasonal_model, xreg = future_fourier_terms, h = 60)
+plot(MSFT_forecast)
+lines(MSFT_returns_test, col = 'red')
+```
+Calculate RMSE:
+```{r echo=FALSE, include=TRUE}
+actuals <- window(MSFT_returns_ts, start = c(2023, 118))
+rmse <- sqrt(mean((actuals - MSFT_forecast$mean)^2, na.rm = TRUE))
+cat("RMSE for Model with Fourier Terms: ", rmse)
+```
+
 
 # Conclusion
 To be added
