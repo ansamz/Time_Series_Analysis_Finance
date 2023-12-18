@@ -142,11 +142,11 @@ MSFT_ts <- zoo(MSFT$MSFT.Adjusted, order.by = MSFT$Index)
 events <- data.frame(
   date = as.Date(c("2023-01-23", "2022-11-30", "2023-06-29", "2023-04-12", "2023-11-15")),
   event = c(
-    "Microsoft investing 10 billion dollars into OpenAI",
-    "ChatGPT being released and created an AI-hype",
-    "Microsoft releasing Bing Co-Pilot and Microsoft Co-Pilot",
-    "The release of DALL-E 3 disrupting the image gen AI market",
-    "Sam Altman leaving OpenAI in November 2023"
+    "Investing into OpenAI",
+    "ChatGPT",
+    "Bing Co-Pilot Release",
+    "DALL-E 3 Release",
+    "Sam Altman Drama"
   )
 )
 
@@ -189,11 +189,13 @@ existing_plot <- ggplot(data = MSFT, aes(x = Index)) +
   theme_minimal()
 
 # Create the arrows layer
-arrows_layer <- ggplot(event_data, aes(x = date, y = MSFT.Adjusted)) +
+arrows_layer <- ggplot(event_data, aes(x = date, y = MSFT.Adjusted, label = event)) +
   geom_segment(aes(xend = date, yend = MSFT.Adjusted - 20), 
                arrow = arrow(type = "closed", length = unit(0.2, "inches")),
                size = 0.5) +
   labs(x = NULL, y = NULL) +  # Remove axis labels
+  geom_text(hjust = 0.6, vjust = -0.3, size = 2.5, color = "black") +  # Add text
+  labs(x = NULL, y = NULL) +  
   theme_void()
 
 # Combine the existing plot and the arrows layer
