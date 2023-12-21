@@ -25,6 +25,7 @@ library(PerformanceAnalytics)
 library(forecast)
 library(rugarch)
 library(vars)
+library(urca)
 library(tseries)
 library(quantmod)
 library(tinytex)
@@ -158,10 +159,38 @@ news_test <- window(news_ts, start="2023-10-01")
 MSFT_VAR_Data <- cbind(MSFT_returns_train, news_train)
 colnames(MSFT_VAR_Data) <- c("MSFT_Returns", "News_Sentiment")
 
+# lag.max = 24 is a starting point for high-frequency data (like daily data), 
+# we consider a larger maximum lag because there could be significant autocorrelations over several days.
 MSFT_VAR <- VAR(MSFT_VAR_Data, ic="AIC", lag.max = 24)
 coeftest(MSFT_VAR)
 ```
 We see that almost none of the coefficients have a statistical significance as their p-values are all above 0.05. An exception is the second lag of MSFT returns. It seems to have a slight negative effect on the current price of MSFT. However, there is only small evidence.
+
+We tried another method of sentiment analysis, VADER (Valence Aware Dictionary and Sentiment Reasoner) is a lexicon and rule-based sentiment analysis tool that assigns sentiment scores to words and combines them to determine the overall sentiment polarity and intensity of a piece of text, with a focus on handling sentiment expressions in informal language such as social media:
+
+```{r echo=FALSE, include=TRUE}
+MSFT.vadar <- read.csv("data/final_data_vadar.csv")
+MSFT.vadar$Index <- as.Date(MSFT.vadar$Index)
+MSFT.vadar$MSFT.Adjusted <- as.numeric(as.character(MSFT.vadar$MSFT.Adjusted))
+MSFT.vadar$sentiment_average_score <- as.numeric(as.character(MSFT.vadar$sentiment_average_score))
+MSFT.vadar_ts <- zoo(MSFT.vadar$MSFT.Adjusted, order.by = MSFT.vadar$Index)
+MSFT.vadar_returns <- na.omit(diff(log(MSFT.vadar_ts)))
+
+vadar.news_ts <- zoo(MSFT.vadar$sentiment_average_score, order.by = MSFT.vadar$Index)
+
+MSFT.vadar_returns_train <- window(MSFT.vadar_returns, start ="2022-01-04", end="2023-09-30")
+MSFT.vadar_returns_test <- window(MSFT.vadar_returns, start="2023-10-01")
+
+vadar.news_train <- window(vadar.news_ts, start ="2022-01-04", end="2023-09-30")
+vadar.news_test <- window(vadar.news_ts, start="2023-10-01")
+
+MSFT.vadar_VAR_Data <- cbind(MSFT.vadar_returns_train, vadar.news_train)
+colnames(MSFT.vadar_VAR_Data) <- c("MSFT_Returns", "News_Sentiment")
+
+MSFT.vadar_VAR <- VAR(MSFT.vadar_VAR_Data, ic="AIC", lag.max = 24)
+coeftest(MSFT.vadar_VAR)
+```
+Overall, this VAR model on the new sentiment analysis indicates that certain past values Microsoft stock returns and reddit posts have a significant impact on the current values of these variables. The model suggests a complex interplay between stock returns and reddit posts sentiment with specific lags being more influential than others. However, many of the coefficients are not significant, suggesting that not all past values are equally informative for predicting current values.
 
 ## Causlaity testing
 As a next step, we do a Granger causality test to confirm that our news sentiments are in fact not a causal driver for the MSFT stock price.
@@ -171,34 +200,40 @@ causality(MSFT_VAR, cause="News_Sentiment")["Granger"]
 ```
 The p-value of 0.34 confirms that the gathered News sentiments are not a causal driver for the MSFT stock price. This leads us to reject our hypothesis.
 
+```{r echo=FALSE, include=TRUE}
+# Casuality test for VADAR
+causality(MSFT.vadar_VAR, cause="News_Sentiment")["Granger"] 
+```
+The p-value of 0.008237 from the Granger causality test suggests that reddit posts sentiment is indeed a causal driver of MSFT stock price. This result leads us to accept the hypothesis that changes in news sentiment have a predictive effect on Microsoft stock returns.
+
 ## Forecasting
-From a practical point of view, our VAR model may still be of some use when applied for forecasting purposes. To see if the inclusion of the news sentiment in our model has an improving effect on the models accuracy when predicting the price movements of MSFT we do some forecasting for our testing period where we include the news sentiment data of the testing period.
+We will use the VADAR VAR model for forecasting purposes to see if the inclusion of the reddit posts sentiment in our model has an improving effect on the models accuracy when predicting the price movements of MSFT we do some forecasting for our testing period where we include the reddit posts sentiment data of the testing period.
 
 At the same time, we setup an ARMA model that is purely based on MSFTs previous price movements. It will serve as our benchmark. 
 
 ```{r echo=FALSE, include=TRUE}
 forecast_data <- data.frame(
-  MSFT_Returns = rep(NA, length(news_test)),
-  News_Sentiment = news_test
+  MSFT_Returns = rep(NA, length(vadar.news_test)),
+  News_Sentiment = vadar.news_test
 )
 
-MSFT_VAR_pred <- predict(MSFT_VAR, newdata = forecast_data, n.ahead=43)
+MSFT_VAR_pred <- predict(MSFT.vadar_VAR, newdata = forecast_data, n.ahead=43)
 plot(MSFT_VAR_pred)
 MSFT_VAR_pred_values <- MSFT_VAR_pred$fcst$MSFT_Returns
 
-rmse_VAR <- sqrt(mean((MSFT_returns_test - MSFT_VAR_pred_values)^2))
+rmse_VAR <- sqrt(mean((MSFT.vadar_returns_test - MSFT_VAR_pred_values)^2))
 cat("RMSE of VAR\t\t\t", rmse_VAR)
 ```
 
 ```{r echo=FALSE, include=TRUE}
-MSFT_ARMA <- auto.arima(MSFT_returns_train)
+MSFT_ARMA <- auto.arima(MSFT.vadar_returns_train)
 MSFT_ARMA
-MSFT_ARMA_pred <- forecast(MSFT_ARMA, level=95, h = length(news_test))
+MSFT_ARMA_pred <- forecast(MSFT_ARMA, level=95, h = length(vadar.news_test))
 plot(MSFT_ARMA_pred)
 ```
 
 ```{r echo=FALSE, include=TRUE}
-rmse_ARMA <- sqrt(mean((MSFT_returns_test - MSFT_ARMA_pred$mean)^2))
+rmse_ARMA <- sqrt(mean((MSFT.vadar_returns_test - MSFT_ARMA_pred$mean)^2))
 cat("RMSE of AR(2) Benchmark \t", rmse_ARMA)
 ```
 We see that auto.arima has found that the order of the auto-regressive (AR) as well as the Moving Average (MA) parts are of order 0. Therefore, we essentially deal with a mean model as our benchmark. During forecasting, we also see that it uses a mean of 0 with a confidence band for all future values. This makes sense, as we deal with stationary data that commonly has a mean of 0. 
@@ -284,7 +319,8 @@ In the forecasting section, you compare the performance of the ARIMA model with 
 
 # Conclusion
 
-In summary, our comprehensive analysis using an ARIMA model with Fourier terms suggests that while there is a discernible pattern in the data, it is not strongly influenced by news sentiment as originally hypothesized. The non-significant results of the Granger causality test, coupled with the model's performance metrics, indicate that Microsoft's stock price movements are likely driven by factors not captured by news sentiment from the selected subreddits. The model's predictive performance indicates an area for potential improvement over a simpler benchmark model.
+In summary, our comprehensive analysis using an ARIMA model with the addition of VADER sentiment analysis suggests offers new insights into the influence of reddit posts sentiment on Microsoft's stock price. The updated Granger causality test results from the VADER model indicate a possible predictive effect of subreddit sentiment on stock returns, a finding that warrants further exploration. While the earlier model did not show a strong sentiment impact, the VADER analysis suggests that sentiment may play a role, although it may not be the primary driver of stock movements. The significant results of the Granger causality test, coupled with the model's performance metrics, indicate that Microsoft's stock price movements are likely driven by factors not captured by news sentiment from the selected subreddits. The model's predictive performance indicates an area for potential improvement over a simpler benchmark model.
+In addition, our examination of seasonality using the Fourier transform revealed complex seasonal patterns in the data. This suggests that stock price movements may be influenced by a combination of factors, including subtle seasonal trends and shifts in sentiment. Our findings suggest potential areas for improvement in modeling and forecasting, and underscore the need for models that can capture these multifaceted influences.
 
 # Future work
 
@@ -300,3 +336,7 @@ Microsoft, 2022 a look back at a year of accelerating progress in AI.
 https://www.microsoft.com/en-us/research/blog/2022-a-look-back-at-a-year-of-accelerating-progress-in-ai/
 
 Roni Bhowmik, Gouranga Chandra Debnath, Nitai Chandra Debnath, Shouyang Wang (2022); Emerging stock market reactions to shocks during various crisis periods 2022). DOI 10.1371/journal.pone.0272450
+
+"The Causal Relationship between Social Media Sentiment and Stock Return: Experimental Evidence from an Online Message Forum" by Lin et al. (2022) examines the causal effect of social media sentiment on stock returns using an experimental approach. The study finds that positive sentiment can significantly increase same-day stock prices, but the effect is short-lived.
+
+"Impact Of Social Media On Stock Market- A Case Of Sentiment Analysis Using Vader" by Kumar et al. (2021) applies the Vader sentiment analysis tool to Twitter data to assess its impact on stock market movements. The study finds that positive sentiment tweets are associated with increased stock prices, while negative sentiment tweets are associated with decreased stock prices.

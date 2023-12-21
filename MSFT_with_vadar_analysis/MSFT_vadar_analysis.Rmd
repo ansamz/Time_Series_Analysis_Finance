@@ -51,77 +51,30 @@ After importing and converting our dataset into a workable format, we observed n
 
 ```{r plot_chunk, fig.height=10, fig.width=14, echo=FALSE, include=TRUE}
 MSFT <- read.csv("final_data_vadar.csv")
-MSFT$Index <- as.Date(MSFT$Index)
+# MSFT$Index <- as.Date(MSFT$Index)
 MSFT$MSFT.Adjusted <- as.numeric(as.character(MSFT$MSFT.Adjusted))
-MSFT$sentiment_average_score <- as.numeric(as.character(MSFT$sentiment_average_score))
 MSFT_ts <- zoo(MSFT$MSFT.Adjusted, order.by = MSFT$Index)
 
-events <- data.frame(
-  date = as.Date(c("2023-01-23", "2022-11-30", "2023-06-29", "2023-04-12", "2023-11-15")),
-  event = c(
-    "Investing into OpenAI",
-    "ChatGPT",
-    "Bing Co-Pilot Release",
-    "DALL-E 3 Release",
-    "Sam Altman Drama"
-  )
-)
+MSFT$Index <- as.Date(MSFT$Index)
+ratio <- max(MSFT$MSFT.Adjusted, na.rm = TRUE) / max(MSFT$sentiment_average_score, na.rm = TRUE)
 
-event_data <- merge(events, MSFT, by.x = "date", by.y = "Index", all.x = TRUE)
-
-ix.na = is.na(MSFT$sentiment_average_score)
-problematic_values <- MSFT$sentiment_average_score[ix.na]
-MSFT$sentiment_average_score[problematic_values] <- NA
-# Replace with 0
-MSFT$sentiment_average_score[problematic_values] <- 0
-MSFT$Index_numeric <- as.numeric(MSFT$Index - as.Date("2000-01-01"))
-MSFT$smoothed_polarity_loess <- with(MSFT, loess(sentiment_average_score ~ Index_numeric, span = 0.2)$fitted)
-
-main_plot <- ggplot(data = MSFT, aes(x = Index)) +
-  geom_line(aes(y = MSFT.Adjusted, color = "MSFT.Adjusted"), size = 1) +
-  ylab("MSFT Adjusted Price") +
-  
-  geom_line(aes(y = sentiment_average_score, color = "Sentiment Average Score"), size = 1) +
-  ylab("Sentiment Average Score") +
-  
+# Create a basic plot
+p <- ggplot(MSFT, aes(x = Index)) +
+  geom_line(aes(y = MSFT.Adjusted, colour = "MSFT Adjusted")) +
+  geom_line(aes(y = sentiment_average_score, colour = "Sentiment Average Score")) +
+  scale_colour_manual("", 
+                      breaks = c("MSFT Adjusted", "Sentiment Average Score"),
+                      values = c("blue", "red")) +
   scale_y_continuous(
-    name = "MSFT Adjusted Price",
-    sec.axis = sec_axis(~./2000, name = "Sentiment Average Score"),
-    limits = c(0, 400),
-    breaks = seq(0, 400, by = 50)
+    "MSFT Adjusted",
+    sec.axis = sec_axis(~ . / ratio, name = "Sentiment Average Score")
   ) +
-  
-  scale_color_manual(
-    values = c("MSFT.Adjusted" = "#00AFBB", "Sentiment Average Score" = "red"),
-    labels = c("MSFT Adjusted Price", "Sentiment Average Score")
-  ) +
-  
-  ggtitle("MSFT Adjusted Price and Sentiment Average Score Over Time") +
-  theme_minimal()
+  labs(title = "MSFT Adjusted and Sentiment Average Score Over Time",
+       x = "Date",
+       y = "MSFT Adjusted")
 
-# Adjust the legend size and position
-main_plot <- main_plot + theme(legend.position = c(0.15, 0.2), 
-                               legend.background = element_blank(), # Transparent background
-                               legend.key = element_blank(), 
-                               legend.text = element_text(size = 8)) # Smaller text size
-
-# arrows and text layer
-arrows_layer <- ggplot(event_data, aes(x = date, y = MSFT.Adjusted, label = event)) +
-  geom_segment(aes(xend = date, yend = MSFT.Adjusted - 20), 
-               arrow = arrow(type = "closed", length = unit(0.1, "inches")),
-               size = 0.5) +
-  labs(x = NULL, y = NULL) +  # Remove axis labels
-  geom_text(hjust = 0.6, vjust = -0.7, size = 2.5, color = "black") +  # Add text
-  labs(x = NULL, y = NULL) +  
-  theme_void()
-
-combined_plot <- main_plot + annotation_custom(
-  ggplotGrob(arrows_layer),
-  xmin = min(event_data$date), xmax = max(event_data$date),
-  ymin = min(event_data$MSFT.Adjusted) + 10, ymax = max(event_data$MSFT.Adjusted) + 10
-)
-
-print(combined_plot)
+# Show the plot
+print(p)
 ```
 We see a clear trend, which is an indicator for non-stationarity, so we do an Augmented Dickey-Fuller (ADF) Test to see whether the data is in fact non-stationary.
 
