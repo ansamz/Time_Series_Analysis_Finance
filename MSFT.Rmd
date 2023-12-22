@@ -199,13 +199,13 @@ causality(MSFT_VAR, cause="News_Sentiment")["Granger"]
 The p-value of 0.34 confirms that the gathered News sentiments are not a causal driver for the MSFT stock price. This leads us to reject our hypothesis.
 
 ```{r echo=FALSE, include=TRUE}
-# Casuality test for VADAR
+# Casuality test for VADER
 causality(MSFT.vadar_VAR, cause="News_Sentiment")["Granger"] 
 ```
 The p-value of 0.008237 from the Granger causality test suggests that reddit posts sentiment is indeed a causal driver of MSFT stock price. This result leads us to accept the hypothesis that changes in news sentiment have a predictive effect on Microsoft stock returns.
 
 ## Forecasting
-We will use the VADAR VAR model for forecasting purposes to see if the inclusion of the reddit posts sentiment in our model has an improving effect on the models accuracy when predicting the price movements of MSFT we do some forecasting for our testing period where we include the reddit posts sentiment data of the testing period.
+We will use the VADER VAR model for forecasting purposes to see if the inclusion of the reddit posts sentiment in our model has an improving effect on the models accuracy when predicting the price movements of MSFT we do some forecasting for our testing period where we include the reddit posts sentiment data of the testing period.
 
 At the same time, we setup an ARMA model that is purely based on MSFTs previous price movements. It will serve as our benchmark. 
 
