@@ -44,7 +44,7 @@ Inspired by this evolution, this paper provides an analysis and forecast of the 
 
 Vector Autoregressive (VAR) processes are popular in economics for their flexibility and simplicity as models for multivariate time series data, forming a vector between variables that affect each other (Suharsono et al. 2017; Aptech 2021). The relationship between the stock prices and the news events will be analysed using a Granger causality testing, similarly as Bhowmik et al. (2022) proceeded when comparing multiple markets.
 
-Hereby MSFT price data was downloaded through the Yahoo API in R and Reddit posts were scraped using Jupyter Notebooks. The python libraries nltk, textblob and wordlcoud were of support in the creation of the sentiment scores.
+Hereby MSFT price data was downloaded through the Yahoo API in R and Reddit posts were scraped using Jupyter Notebooks. The python libraries nltk, textblob, VADER (Kumar et al. 2021) and wordlcoud were of support in the creation of the sentiment scores. VADER (Valence Aware Dictionary and Sentiment Reasoner) is a lexicon and rule-based sentiment analysis tool that assigns sentiment scores to words and combines them to determine the overall sentiment polarity and intensity of a piece of text, with a focus on handling sentiment expressions in informal language such as social media.
 
 # Analysis:
 First, we import the data and convert it to a time series so that we may plot it.
@@ -134,18 +134,16 @@ We see that based on the p-value of 0.7051 the ADF Test suggests that the price 
 
 ```{r echo=FALSE, include=TRUE}
 MSFT_returns <- na.omit(diff(log(MSFT_ts)))
-
 plot(MSFT_returns)
+```
+
+```{r echo=FALSE, include=TRUE}
 adf.test(MSFT_returns)
 ```
 ## Creating a VAR Model using News sentiment
 Now, that we deal with stationary data we can begin with our analysis. 
 
-We divide the dataset into a Train/Test Split, whereas November and December 2023 will serve as a test set for later predicitions.
-
-First we create a time series of news sentiment data. Combined with the price returns, we can create a Vector Autoregression model. This will be our basis to check whether News are a causal driver for MSFT price returns.
-
-We then do a coefficient test, to get more information on the statistical significance of the coefficients of our VAR Model.
+We divide the dataset into a Train/Test Split, whereas November and December 2023 will serve as a test set for later predicitions. First we create a time series of news sentiment data. Combined with the price returns, we can create a Vector Autoregression model. This will be our basis to check whether News are a causal driver for MSFT price returns. We then do a coefficient test, to get more information on the statistical significance of the coefficients of our VAR Model.
 
 ```{r echo=FALSE, include=TRUE}
 news_ts <- zoo(MSFT$average_polarity, order.by = MSFT$Index)
@@ -166,7 +164,7 @@ coeftest(MSFT_VAR)
 ```
 We see that almost none of the coefficients have a statistical significance as their p-values are all above 0.05. An exception is the second lag of MSFT returns. It seems to have a slight negative effect on the current price of MSFT. However, there is only small evidence.
 
-We tried another method of sentiment analysis, VADER (Valence Aware Dictionary and Sentiment Reasoner) is a lexicon and rule-based sentiment analysis tool that assigns sentiment scores to words and combines them to determine the overall sentiment polarity and intensity of a piece of text, with a focus on handling sentiment expressions in informal language such as social media:
+We tried another method of sentiment analysis, VADER:
 
 ```{r echo=FALSE, include=TRUE}
 MSFT.vadar <- read.csv("data/final_data_vadar.csv")
@@ -219,8 +217,10 @@ forecast_data <- data.frame(
 
 MSFT_VAR_pred <- predict(MSFT.vadar_VAR, newdata = forecast_data, n.ahead=43)
 plot(MSFT_VAR_pred)
-MSFT_VAR_pred_values <- MSFT_VAR_pred$fcst$MSFT_Returns
+```
 
+```{r echo=FALSE, include=TRUE}
+MSFT_VAR_pred_values <- MSFT_VAR_pred$fcst$MSFT_Returns
 rmse_VAR <- sqrt(mean((MSFT.vadar_returns_test - MSFT_VAR_pred_values)^2))
 cat("RMSE of VAR\t\t\t", rmse_VAR)
 ```
@@ -228,6 +228,9 @@ cat("RMSE of VAR\t\t\t", rmse_VAR)
 ```{r echo=FALSE, include=TRUE}
 MSFT_ARMA <- auto.arima(MSFT.vadar_returns_train)
 MSFT_ARMA
+```
+
+```{r echo=FALSE, include=TRUE}
 MSFT_ARMA_pred <- forecast(MSFT_ARMA, level=95, h = length(vadar.news_test))
 plot(MSFT_ARMA_pred)
 ```
@@ -260,11 +263,10 @@ ggplot(fourier, aes(x = frequency, y = spectrum)) +
        y = "Amplitude")
 ```
 
-We notice in this plot the presence of multiple peaks suggesting that there are several cyclical patterns in the data. This can happen if there are multiple underlying seasonalities or other forms of cyclical behavior. But there is not a single, dominant low-frequency component that clearly stands out. This suggests that the data might not have a strong trend or annual seasonality, or it may be masked by the noise. The problem is if we attempt to model all these frequencies, there's a risk of overfitting your time series model to the noise rather than to actual, meaningful seasonal patterns.
+We notice in this plot the presence of multiple peaks suggesting that there are several cyclical patterns in the data. This can happen if there are multiple underlying seasonalities or other forms of cyclical behavior. But there is not a single, dominant low-frequency component that clearly stands out. This suggests that the data might not have a strong trend or annual seasonality, or it may be masked by the noise. The problem is if we attempt to model all these frequencies, there's a risk of overfitting the time series model to the noise rather than to actual, meaningful seasonal patterns.
 
-Our Fourier analysis revealed multiple periodicities within the time series, suggesting complex seasonality. While including multiple Fourier terms can model these patterns, there is a risk of overfitting, especially if the data may contain noise masquerading as seasonal effects. To avoid this, we considered models that use a reduced set of Fourier terms, focusing only on the most significant frequencies. We also explored alternative methods, such as wavelet analysis, which can handle multiple levels of seasonality without assuming a fixed cycle length. These techniques allow us to capture the most important seasonal effects while reducing the risk of overfitting to the noise in the data.
+We also explored alternative methods, such as wavelet analysis, which can handle multiple levels of seasonality without assuming a fixed cycle length. These techniques allow us to capture the most important seasonal effects while reducing the risk of overfitting to the noise in the data.
 
-### Reevaluating seasonality and trend
 ```{r echo=FALSE, include=TRUE}
 # Convert to ts object, starting from the first date, with a frequency of 365 (daily data)
 start_date <- as.numeric(format(index(MSFT_returns)[1], "%Y")) + (as.numeric(format(index(MSFT_returns)[1], "%j")) - 1) / 365
@@ -281,7 +283,8 @@ significant_spectrum <- spectrum_analysis$spec[peak_frequencies]
 plot(spectrum_analysis$freq, spectrum_analysis$spec, type = 'l', xlab = 'Frequency', ylab = 'Spectral Density')
 points(significant_frequencies, significant_spectrum, col = 'red', pch = 19)
 ```
-## Model Selection
+
+### Model Selection
 
 Based on the results of the Fourier analysis, we found it prudent to look for a model that would allow greater flexibility in capturing the identified seasonal patterns without overfitting. This led us to consider the ARIMA model, which can be augmented with Fourier terms to account for the complex seasonality observed.
 The ARIMA model was chosen for its ability to model non-seasonal and seasonal lags of the differenced series, which makes it suitable for our data, which exhibit non-stationarity. In addition, the inclusion of Fourier terms allows us to incorporate the significant seasonal frequencies identified earlier, providing a robust approach to capturing the underlying patterns in the data.
@@ -313,9 +316,6 @@ actuals <- coredata(MSFT_returns_test)
 rmse <- sqrt(mean((actuals - MSFT_forecast$mean)^2, na.rm = TRUE))
 cat("RMSE for Model with Fourier Terms: ", rmse, "\n")
 ```
-## Forecasting Discussion: 
-
-In the forecasting section, you compare the performance of the ARIMA model with a benchmark model. It would be beneficial to discuss the implications of these results in more detail, explaining why the benchmark might perform better and what this suggests about the predictability of the stock price.
 
 # Conclusion
 
@@ -328,15 +328,15 @@ For future research, we recommend investigating additional variables that may be
 
 # Bibliography:
 
-Agus Shuarsono, Auliya Aziza and Wara Pramesti (2017); Comparison of vector autoregressive (VAR) and vector error correction models (VECM) for index of ASEAN stock price. DOI 10.1063/1.5016666
+- Agus Shuarsono, Auliya Aziza and Wara Pramesti (2017); Comparison of vector autoregressive (VAR) and vector error correction models (VECM) for index of ASEAN stock price. DOI 10.1063/1.5016666
 
-Aptech, Introduction to the Fundamentals of Vector Autoregressive Models (2021). https://www.aptech.com/blog/introduction-to-the-fundamentals-of-vector-autoregressive-models/
+- Aptech, Introduction to the Fundamentals of Vector Autoregressive Models (2021). https://www.aptech.com/blog/introduction-to-the-fundamentals-of-vector-autoregressive-models/
 
-Microsoft, 2022 a look back at a year of accelerating progress in AI.
+- Microsoft, 2022 a look back at a year of accelerating progress in AI.
 https://www.microsoft.com/en-us/research/blog/2022-a-look-back-at-a-year-of-accelerating-progress-in-ai/
 
-Roni Bhowmik, Gouranga Chandra Debnath, Nitai Chandra Debnath, Shouyang Wang (2022); Emerging stock market reactions to shocks during various crisis periods 2022). DOI 10.1371/journal.pone.0272450
+- Roni Bhowmik, Gouranga Chandra Debnath, Nitai Chandra Debnath, Shouyang Wang (2022); Emerging stock market reactions to shocks during various crisis periods 2022). DOI 10.1371/journal.pone.0272450
 
-"The Causal Relationship between Social Media Sentiment and Stock Return: Experimental Evidence from an Online Message Forum" by Lin et al. (2022) examines the causal effect of social media sentiment on stock returns using an experimental approach. The study finds that positive sentiment can significantly increase same-day stock prices, but the effect is short-lived.
+- Wang, X., Xiang, Z., Xu, W., & Yuan, P. (2022). The causal relationship between social media sentiment and stock return: Experimental evidence from an online message forum. Economics Letters, 216.  [Link](https://doi.org/10.1016/j.econlet.2022.110598&#8203) 
 
-"Impact Of Social Media On Stock Market- A Case Of Sentiment Analysis Using Vader" by Kumar et al. (2021) applies the Vader sentiment analysis tool to Twitter data to assess its impact on stock market movements. The study finds that positive sentiment tweets are associated with increased stock prices, while negative sentiment tweets are associated with decreased stock prices.
+- Singh, A., Singh, J., & Ghosal, A. (2022). Impact of social media on stock market- A case of sentiment analysis using Vader. In 2022 International Conference on Machine Learning Big Data Cloud and Parallel Computing (COM-IT-CON).  [link](https://doi.org/10.1109/COM-IT-CON54601.2022.9850668&#8203)
