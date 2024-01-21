@@ -1,0 +1,342 @@
+---
+title: "The Impact of News Sentiment on MSFT"
+author: "Ansam Zedan, Daniel Wullschleger"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+
+```
+
+```{r include=FALSE}
+if (!require("vars")) install.packages("vars", dependencies=TRUE)
+if (!require("tseries")) install.packages("tseries", dependencies=TRUE)
+if (!require("quantmod")) install.packages("quantmod", dependencies=TRUE)
+if (!require("PerformanceAnalytics")) install.packages("PerformanceAnalytics", dependencies=TRUE)
+if (!require("forecast")) install.packages("forecast", dependencies=TRUE)
+if (!require("rugarch")) install.packages("rugarch", dependencies=TRUE)
+if (!require("tinytex")) install.packages("tinytex", dependencies=TRUE)
+if (!require("zoo")) install.packages("zoo", dependencies=TRUE)
+if (!require("ggplot2")) install.packages("ggplot2", dependencies=TRUE)
+
+library(PerformanceAnalytics)
+library(forecast)
+library(rugarch)
+library(vars)
+library(urca)
+library(tseries)
+library(quantmod)
+library(tinytex)
+library(zoo)
+library(ggplot2)
+library(utils)
+library(dplyr)
+library(xts)
+library(timeSeries)
+```
+
+# Introduction 
+In recent years Microsoft has pushed and achieved great progress in a diverse portfolio of technologies (Microsoft, 2022) including also partnerships with AI research centers such as OpenAI. Alongside this development, its stock price has since reached new all-time highs and persists to be a major player in tech investments.
+
+Inspired by this evolution, this paper provides an analysis and forecast of the stock price of Microsoft based on news sentiment data from subreddits such as r/worldnews, r/investing and r/stocks using a vector autoregressive (VAR) model.
+
+Vector Autoregressive (VAR) processes are popular in economics for their flexibility and simplicity as models for multivariate time series data, forming a vector between variables that affect each other (Suharsono et al. 2017; Aptech 2021). The relationship between the stock prices and the news events will be analysed using a Granger causality testing, similarly as Bhowmik et al. (2022) proceeded when comparing multiple markets.
+
+Hereby MSFT price data was downloaded through the Yahoo API in R and Reddit posts were scraped using Jupyter Notebooks. The python libraries nltk, textblob, VADER (Kumar et al. 2021) and wordlcoud were of support in the creation of the sentiment scores. VADER (Valence Aware Dictionary and Sentiment Reasoner) is a lexicon and rule-based sentiment analysis tool that assigns sentiment scores to words and combines them to determine the overall sentiment polarity and intensity of a piece of text, with a focus on handling sentiment expressions in informal language such as social media.
+
+# Analysis:
+First, we import the data and convert it to a time series so that we may plot it.
+After importing and converting our dataset into a workable format, we observed noticeable noise in the average_polarity data. To address this, we applied a LOESS smoothing technique. This method allows us to smooth out short-term fluctuations and highlight longer-term trends in sentiment data, crucial for correlating with stock price movements. The choice of the smoothing parameter (span) was iteratively refined to balance detail and smoothness
+
+```{r plot_chunk, fig.height=10, fig.width=14, echo=FALSE, include=TRUE}
+MSFT <- read.csv("data/final_data.csv")
+MSFT$Index <- as.Date(MSFT$Index)
+MSFT$MSFT.Adjusted <- as.numeric(as.character(MSFT$MSFT.Adjusted))
+MSFT$average_polarity <- as.numeric(as.character(MSFT$average_polarity))
+MSFT_ts <- zoo(MSFT$MSFT.Adjusted, order.by = MSFT$Index)
+
+events <- data.frame(
+  date = as.Date(c("2023-01-23", "2022-11-30", "2023-06-29", "2023-04-12", "2023-11-15")),
+  event = c(
+    "Investing into OpenAI",
+    "ChatGPT",
+    "Bing Co-Pilot Release",
+    "DALL-E 3 Release",
+    "Sam Altman Drama"
+  )
+)
+
+event_data <- merge(events, MSFT, by.x = "date", by.y = "Index", all.x = TRUE)
+
+ix.na = is.na(MSFT$average_polarity)
+problematic_values <- MSFT$average_polarity[ix.na]
+MSFT$average_polarity[problematic_values] <- NA
+# Replace with 0
+MSFT$average_polarity[problematic_values] <- 0
+MSFT$Index_numeric <- as.numeric(MSFT$Index - as.Date("2000-01-01"))
+MSFT$smoothed_polarity_loess <- with(MSFT, loess(average_polarity ~ Index_numeric, span = 0.2)$fitted)
+
+main_plot <- ggplot(data = MSFT, aes(x = Index)) +
+  geom_line(aes(y = MSFT.Adjusted, color = "MSFT.Adjusted"), size = 1) +
+  ylab("MSFT Adjusted Price") +
+  
+  geom_line(aes(y = smoothed_polarity_loess * 2000, color = "Sentiment Average Score"), size = 1) +
+  ylab("Sentiment Average Score") +
+  
+  scale_y_continuous(
+    name = "MSFT Adjusted Price",
+    sec.axis = sec_axis(~./2000, name = "Sentiment Average Score"),
+    limits = c(0, 400),
+    breaks = seq(0, 400, by = 50)
+  ) +
+  
+  scale_color_manual(
+    values = c("MSFT.Adjusted" = "#00AFBB", "Sentiment Average Score" = "red"),
+    labels = c("MSFT Adjusted Price", "Sentiment Average Score")
+  ) +
+  
+  ggtitle("MSFT Adjusted Price and Sentiment Average Score Over Time") +
+  theme_minimal()
+
+# Adjust the legend size and position
+main_plot <- main_plot + theme(legend.position = c(0.15, 0.2), 
+                               legend.background = element_blank(), # Transparent background
+                               legend.key = element_blank(), 
+                               legend.text = element_text(size = 8)) # Smaller text size
+
+# arrows and text layer
+arrows_layer <- ggplot(event_data, aes(x = date, y = MSFT.Adjusted, label = event)) +
+  geom_segment(aes(xend = date, yend = MSFT.Adjusted - 20), 
+               arrow = arrow(type = "closed", length = unit(0.1, "inches")),
+               size = 0.5) +
+  labs(x = NULL, y = NULL) +  # Remove axis labels
+  geom_text(hjust = 0.6, vjust = -0.7, size = 2.5, color = "black") +  # Add text
+  labs(x = NULL, y = NULL) +  
+  theme_void()
+
+combined_plot <- main_plot + annotation_custom(
+  ggplotGrob(arrows_layer),
+  xmin = min(event_data$date), xmax = max(event_data$date),
+  ymin = min(event_data$MSFT.Adjusted) + 10, ymax = max(event_data$MSFT.Adjusted) + 10
+)
+
+print(combined_plot)
+```
+We see a clear trend, which is an indicator for non-stationarity, so we do an Augmented Dickey-Fuller (ADF) Test to see whether the data is in fact non-stationary.
+
+```{r echo=FALSE, include=TRUE}
+adf.test(MSFT_ts) 
+```
+## Achieving Stationarity
+We see that based on the p-value of 0.7051 the ADF Test suggests that the price data is non-stationary. So we a apply a log-transform with subsequent differencing to calculate continuous returns on MSFT. These should behave stationary.
+
+```{r echo=FALSE, include=TRUE}
+MSFT_returns <- na.omit(diff(log(MSFT_ts)))
+plot(MSFT_returns)
+```
+
+```{r echo=FALSE, include=TRUE}
+adf.test(MSFT_returns)
+```
+## Creating a VAR Model using News sentiment
+Now, that we deal with stationary data we can begin with our analysis. 
+
+We divide the dataset into a Train/Test Split, whereas November and December 2023 will serve as a test set for later predicitions. First we create a time series of news sentiment data. Combined with the price returns, we can create a Vector Autoregression model. This will be our basis to check whether News are a causal driver for MSFT price returns. We then do a coefficient test, to get more information on the statistical significance of the coefficients of our VAR Model.
+
+```{r echo=FALSE, include=TRUE}
+news_ts <- zoo(MSFT$average_polarity, order.by = MSFT$Index)
+
+MSFT_returns_train <- window(MSFT_returns, start ="2022-01-04", end="2023-09-30")
+MSFT_returns_test <- window(MSFT_returns, start="2023-10-01")
+
+news_train <- window(news_ts, start ="2022-01-04", end="2023-09-30")
+news_test <- window(news_ts, start="2023-10-01")
+
+MSFT_VAR_Data <- cbind(MSFT_returns_train, news_train)
+colnames(MSFT_VAR_Data) <- c("MSFT_Returns", "News_Sentiment")
+
+# lag.max = 24 is a starting point for high-frequency data (like daily data), 
+# we consider a larger maximum lag because there could be significant autocorrelations over several days.
+MSFT_VAR <- VAR(MSFT_VAR_Data, ic="AIC", lag.max = 24)
+coeftest(MSFT_VAR)
+```
+We see that almost none of the coefficients have a statistical significance as their p-values are all above 0.05. An exception is the second lag of MSFT returns. It seems to have a slight negative effect on the current price of MSFT. However, there is only small evidence.
+
+We tried another method of sentiment analysis, VADER:
+
+```{r echo=FALSE, include=TRUE}
+MSFT.vadar <- read.csv("data/final_data_vadar.csv")
+MSFT.vadar$Index <- as.Date(MSFT.vadar$Index)
+MSFT.vadar$MSFT.Adjusted <- as.numeric(as.character(MSFT.vadar$MSFT.Adjusted))
+MSFT.vadar$sentiment_average_score <- as.numeric(as.character(MSFT.vadar$sentiment_average_score))
+MSFT.vadar_ts <- zoo(MSFT.vadar$MSFT.Adjusted, order.by = MSFT.vadar$Index)
+MSFT.vadar_returns <- na.omit(diff(log(MSFT.vadar_ts)))
+
+vadar.news_ts <- zoo(MSFT.vadar$sentiment_average_score, order.by = MSFT.vadar$Index)
+
+MSFT.vadar_returns_train <- window(MSFT.vadar_returns, start ="2022-01-04", end="2023-09-30")
+MSFT.vadar_returns_test <- window(MSFT.vadar_returns, start="2023-10-01")
+
+vadar.news_train <- window(vadar.news_ts, start ="2022-01-04", end="2023-09-30")
+vadar.news_test <- window(vadar.news_ts, start="2023-10-01")
+
+MSFT.vadar_VAR_Data <- cbind(MSFT.vadar_returns_train, vadar.news_train)
+colnames(MSFT.vadar_VAR_Data) <- c("MSFT_Returns", "News_Sentiment")
+
+MSFT.vadar_VAR <- VAR(MSFT.vadar_VAR_Data, ic="AIC", lag.max = 24)
+coeftest(MSFT.vadar_VAR)
+```
+Overall, this VAR model on the new sentiment analysis indicates that certain past values Microsoft stock returns and reddit posts have a significant impact on the current values of these variables. The model suggests a complex interplay between stock returns and reddit posts sentiment with specific lags being more influential than others. However, many of the coefficients are not significant, suggesting that not all past values are equally informative for predicting current values.
+
+## Causlaity testing
+As a next step, we do a Granger causality test to confirm that our news sentiments are in fact not a causal driver for the MSFT stock price.
+
+```{r echo=FALSE, include=TRUE}
+causality(MSFT_VAR, cause="News_Sentiment")["Granger"] 
+```
+The p-value of 0.34 confirms that the gathered News sentiments are not a causal driver for the MSFT stock price. This leads us to reject our hypothesis.
+
+```{r echo=FALSE, include=TRUE}
+# Casuality test for VADER
+causality(MSFT.vadar_VAR, cause="News_Sentiment")["Granger"] 
+```
+The p-value of 0.008237 from the Granger causality test suggests that reddit posts sentiment is indeed a causal driver of MSFT stock price. This result leads us to accept the hypothesis that changes in news sentiment have a predictive effect on Microsoft stock returns.
+
+## Forecasting
+We will use the VADER VAR model for forecasting purposes to see if the inclusion of the reddit posts sentiment in our model has an improving effect on the models accuracy when predicting the price movements of MSFT we do some forecasting for our testing period where we include the reddit posts sentiment data of the testing period.
+
+At the same time, we setup an ARMA model that is purely based on MSFTs previous price movements. It will serve as our benchmark. 
+
+```{r echo=FALSE, include=TRUE}
+forecast_data <- data.frame(
+  MSFT_Returns = rep(NA, length(vadar.news_test)),
+  News_Sentiment = vadar.news_test
+)
+
+MSFT_VAR_pred <- predict(MSFT.vadar_VAR, newdata = forecast_data, n.ahead=43)
+plot(MSFT_VAR_pred)
+```
+
+```{r echo=FALSE, include=TRUE}
+MSFT_VAR_pred_values <- MSFT_VAR_pred$fcst$MSFT_Returns
+rmse_VAR <- sqrt(mean((MSFT.vadar_returns_test - MSFT_VAR_pred_values)^2))
+cat("RMSE of VAR\t\t\t", rmse_VAR)
+```
+
+```{r echo=FALSE, include=TRUE}
+MSFT_ARMA <- auto.arima(MSFT.vadar_returns_train)
+MSFT_ARMA
+```
+
+```{r echo=FALSE, include=TRUE}
+MSFT_ARMA_pred <- forecast(MSFT_ARMA, level=95, h = length(vadar.news_test))
+plot(MSFT_ARMA_pred)
+```
+
+```{r echo=FALSE, include=TRUE}
+rmse_ARMA <- sqrt(mean((MSFT.vadar_returns_test - MSFT_ARMA_pred$mean)^2))
+cat("RMSE of AR(2) Benchmark \t", rmse_ARMA)
+```
+We see that auto.arima has found that the order of the auto-regressive (AR) as well as the Moving Average (MA) parts are of order 0. Therefore, we essentially deal with a mean model as our benchmark. During forecasting, we also see that it uses a mean of 0 with a confidence band for all future values. This makes sense, as we deal with stationary data that commonly has a mean of 0. 
+
+While the VAR model reaches an RSME of 0.036 when compared to the truth values of our test set, the mean model benchmark reaches an RSME of 0.014. This means, our more sophisticated VAR model actually performs worse than the more simple benchmark that is purely based on the mean.
+
+# Seasonal Adjustment
+
+After many trials of extracting seasonality by using the STL and decompose method, we approached the problem using Fourier Transform due to the inconsistent nature of stock market data.
+
+```{r echo=FALSE, include=TRUE}
+# Number of observations in the ime series
+n <- length(MSFT_returns)
+
+fourier <- data.frame(frequency = 1:(n/2), 
+                      spectrum = abs(fft(coredata(MSFT_returns)))[1:(n/2)])
+
+# Plot the Fourier Transform spectrum - can remove later
+ggplot(fourier, aes(x = frequency, y = spectrum)) +
+  geom_line() +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) +
+  labs(title = "Fourier Transform of MSFT Adjusted Prices", 
+       x = "Frequency", 
+       y = "Amplitude")
+```
+
+We notice in this plot the presence of multiple peaks suggesting that there are several cyclical patterns in the data. This can happen if there are multiple underlying seasonalities or other forms of cyclical behavior. But there is not a single, dominant low-frequency component that clearly stands out. This suggests that the data might not have a strong trend or annual seasonality, or it may be masked by the noise. The problem is if we attempt to model all these frequencies, there's a risk of overfitting the time series model to the noise rather than to actual, meaningful seasonal patterns.
+
+We also explored alternative methods, such as wavelet analysis, which can handle multiple levels of seasonality without assuming a fixed cycle length. These techniques allow us to capture the most important seasonal effects while reducing the risk of overfitting to the noise in the data.
+
+```{r echo=FALSE, include=TRUE}
+# Convert to ts object, starting from the first date, with a frequency of 365 (daily data)
+start_date <- as.numeric(format(index(MSFT_returns)[1], "%Y")) + (as.numeric(format(index(MSFT_returns)[1], "%j")) - 1) / 365
+MSFT_returns_ts <- ts(MSFT_returns, start = start_date, frequency = 365)
+
+# Conduct a spectral analysis to identify significant frequencies
+spectrum_analysis <- spectrum(MSFT_returns_ts, spans = c(3, 5), plot = FALSE)
+
+# Identify peaks in the spectral density
+peak_frequencies <- which(diff(sign(diff(spectrum_analysis$spec))) == -2) + 1
+significant_frequencies <- spectrum_analysis$freq[peak_frequencies]
+significant_spectrum <- spectrum_analysis$spec[peak_frequencies]
+
+plot(spectrum_analysis$freq, spectrum_analysis$spec, type = 'l', xlab = 'Frequency', ylab = 'Spectral Density')
+points(significant_frequencies, significant_spectrum, col = 'red', pch = 19)
+```
+
+### Model Selection
+
+Based on the results of the Fourier analysis, we found it prudent to look for a model that would allow greater flexibility in capturing the identified seasonal patterns without overfitting. This led us to consider the ARIMA model, which can be augmented with Fourier terms to account for the complex seasonality observed.
+The ARIMA model was chosen for its ability to model non-seasonal and seasonal lags of the differenced series, which makes it suitable for our data, which exhibit non-stationarity. In addition, the inclusion of Fourier terms allows us to incorporate the significant seasonal frequencies identified earlier, providing a robust approach to capturing the underlying patterns in the data.
+
+```{r echo=FALSE, include=TRUE}
+n <- length(MSFT_returns)
+# Extract seasonal components using Fourier series
+future_fourier_terms <- fourier(MSFT_returns_ts, K = length(significant_frequencies), h = n) # 60 forecast horizon - 2 months 
+
+# Model the seasonality by including Fourier terms as external regressors
+MSFT_seasonal_model <- auto.arima(MSFT_returns_ts, xreg = future_fourier_terms, seasonal = FALSE)
+summary(MSFT_seasonal_model)
+```
+The best-fit model for the series is an ARIMA(2,0,1). This model includes autoregressive (AR) terms, moving average (MA) terms, and various regression coefficients for exogenous variables. The model's log-likelihood is 1259.22, and it exhibits a reasonable AIC value, which suggest a good balance between model fit and complexity. The BIC value is also indicative of a well-fitting model. The training set error measures indicate that the model performs well on the training data, with a small mean error (ME) and low root mean squared error (RMSE) and mean absolute error (MAE). However, the MPE and MAPE are relatively high, suggesting some room for improvement in capturing certain patterns in the data. The MASE is 0.6607, and the autocorrelation of residuals (ACF1) is -0.0065.
+
+## Forecasting with the ARIMA Model
+
+With our chosen model, we proceeded to forecasting. Here, we assess the model's predictive capability and compare its performance against a simpler benchmark model.
+
+```{r echo=FALSE, include=TRUE}
+# Fit the time series model and make forecasts
+MSFT_forecast <- forecast(MSFT_seasonal_model, xreg = future_fourier_terms, h = length(MSFT_returns_test))
+plot(MSFT_forecast)
+lines(MSFT_returns_test, col = 'red')
+```
+Calculate RMSE:
+```{r echo=FALSE, include=TRUE}
+actuals <- coredata(MSFT_returns_test)
+rmse <- sqrt(mean((actuals - MSFT_forecast$mean)^2, na.rm = TRUE))
+cat("RMSE for Model with Fourier Terms: ", rmse, "\n")
+```
+
+# Conclusion
+
+In summary, our comprehensive analysis using an ARIMA model with the addition of VADER sentiment analysis suggests offers new insights into the influence of reddit posts sentiment on Microsoft's stock price. The updated Granger causality test results from the VADER model indicate a possible predictive effect of subreddit sentiment on stock returns, a finding that warrants further exploration. While the earlier model did not show a strong sentiment impact, the VADER analysis suggests that sentiment may play a role, although it may not be the primary driver of stock movements. The significant results of the Granger causality test, coupled with the model's performance metrics, indicate that Microsoft's stock price movements are likely driven by factors not captured by news sentiment from the selected subreddits. The model's predictive performance indicates an area for potential improvement over a simpler benchmark model.
+In addition, our examination of seasonality using the Fourier transform revealed complex seasonal patterns in the data. This suggests that stock price movements may be influenced by a combination of factors, including subtle seasonal trends and shifts in sentiment. Our findings suggest potential areas for improvement in modeling and forecasting, and underscore the need for models that can capture these multifaceted influences.
+
+# Future work
+
+For future research, we recommend investigating additional variables that may better explain the variance in Microsoft stock prices, such as economic indicators, market indices, or sentiment from a broader range of news sources. It may also be beneficial to incorporate machine learning models capable of capturing non-linear relationships within the data. In addition, expanding the dataset to include high-frequency trading data could provide more granular insights into the impact of news events. Continued refinement of the model, including exploration of non-traditional forms of seasonality, will be critical to improving the predictive power of our analysis.
+
+# Bibliography:
+
+- Agus Shuarsono, Auliya Aziza and Wara Pramesti (2017); Comparison of vector autoregressive (VAR) and vector error correction models (VECM) for index of ASEAN stock price. DOI 10.1063/1.5016666
+
+- Aptech, Introduction to the Fundamentals of Vector Autoregressive Models (2021). https://www.aptech.com/blog/introduction-to-the-fundamentals-of-vector-autoregressive-models/
+
+- Microsoft, 2022 a look back at a year of accelerating progress in AI.
+https://www.microsoft.com/en-us/research/blog/2022-a-look-back-at-a-year-of-accelerating-progress-in-ai/
+
+- Roni Bhowmik, Gouranga Chandra Debnath, Nitai Chandra Debnath, Shouyang Wang (2022); Emerging stock market reactions to shocks during various crisis periods 2022). DOI 10.1371/journal.pone.0272450
+
+- Wang, X., Xiang, Z., Xu, W., & Yuan, P. (2022). The causal relationship between social media sentiment and stock return: Experimental evidence from an online message forum. Economics Letters, 216.  [Link](https://doi.org/10.1016/j.econlet.2022.110598&#8203) 
+
+- Singh, A., Singh, J., & Ghosal, A. (2022). Impact of social media on stock market- A case of sentiment analysis using Vader. In 2022 International Conference on Machine Learning Big Data Cloud and Parallel Computing (COM-IT-CON).  [link](https://doi.org/10.1109/COM-IT-CON54601.2022.9850668&#8203)
